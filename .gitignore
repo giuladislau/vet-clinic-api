@@ -1,36 +1,87 @@
-HELP.md
+# ===============================
+# Build
+# ===============================
 target/
+build/
+out/
+
+# ===============================
+# Maven
+# ===============================
 .mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
+!/.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+
+# ===============================
+# Logs
+# ===============================
 *.log
-*.class
-.env
+logs/
 
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
+# ===============================
+# Arquivos temporários
+# ===============================
+*.tmp
+*.temp
+*.swp
+*.swo
 
-### IntelliJ IDEA ###
-.idea
-*.iws
+# ===============================
+# IDEs
+# ===============================
+
+# IntelliJ
+.idea/
 *.iml
+*.iws
 *.ipr
 
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-build/
-!**/src/main/**/build/
-!**/src/test/**/build/
+# Eclipse
+.project
+.classpath
+.settings/
 
-### VS Code ###
+# VSCode
 .vscode/
+
+# NetBeans
+nbproject/private/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# ===============================
+# Sistema operacional
+# ===============================
+
+# Linux
+*~
+
+# Mac
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ===============================
+# Arquivos de ambiente
+# ===============================
+.env
+.env.local
+.env.*
+
+# ===============================
+# Banco local
+# ===============================
+*.db
+*.mv.db
+*.trace.db
+
+# ===============================
+# Arquivos de teste e cobertura
+# ===============================
+coverage/
+*.coverage
