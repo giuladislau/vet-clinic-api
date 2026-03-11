@@ -1,10 +1,5 @@
 # 🐾 Vet Clinic API
 
-> API REST para gerenciamento de agendamentos em clínica veterinária, desenvolvida com Java e Spring Boot.
-
----
-
-## **Descrição**
 A **Vet Clinic API** é uma aplicação back-end que permite o gerenciamento completo de clientes, pets, serviços veterinários e agendamentos. O sistema expõe endpoints RESTful para operações de cadastro, consulta, atualização e cancelamento, com persistência em banco de dados PostgreSQL e documentação interativa via Swagger UI.
 
 ---
