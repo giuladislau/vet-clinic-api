@@ -40,7 +40,6 @@ Controller  →  Service  →  Repository  →  Banco de Dados (PostgreSQL)
 ---
 
 ## **Estrutura de Pastas**
-
 ```
 vet-clinic-api/
 ├── src/
