@@ -15,6 +15,8 @@ A **Vet Clinic API** é uma aplicação back-end que permite o gerenciamento com
 | Spring Validation | Validação de dados de entrada |
 | Spring Security | Configuração de segurança (base) |
 | PostgreSQL | Banco de dados relacional |
+| MapStruct | Mapeamento automático entre DTOs e Entidades |
+| JWT (JSON Web Token) | Autenticação stateless |
 | Lombok | Redução de boilerplate (getters, builders, etc.) |
 | SpringDoc OpenAPI 2.5.0 | Geração de documentação Swagger |
 | Maven | Gerenciador de dependências e build |
@@ -22,20 +24,20 @@ A **Vet Clinic API** é uma aplicação back-end que permite o gerenciamento com
 ---
 
 ## **Arquitetura do Projeto**
-A aplicação segue a arquitetura em camadas padrão do Spring Boot:
+A aplicação utiliza uma arquitetura orientada a domínios (feature-based) que agrupa os componentes por funcionalidade em vez das camadas MVC tradicionais:
 
 ```
 Controller  →  Service  →  Repository  →  Banco de Dados (PostgreSQL)
-    ↑
-  DTO (entrada de dados)
+    ↑             ↑
+  DTO         MapStruct
 ```
 
-- **Controller**: recebe as requisições HTTP e delega ao Service
-- **Service**: contém as regras de negócio
-- **Repository**: interface com o banco de dados via Spring Data JPA
-- **Entity**: classes mapeadas como tabelas do banco de dados
-- **DTO**: objetos de transferência de dados para entradas nas requisições
-- **Exception**: tratamento de exceções customizadas
+- **Controller**: recebe as requisições HTTP, valida as permissões (via Spring Security) e delega ao Service.
+- **Service**: contém as regras de negócio e lançamentos de exceção customizadas.
+- **Repository**: interface com o banco de dados via Spring Data JPA.
+- **Mapper**: classes MapStruct para conversão entre `Data Transfer Objects (DTO)` e `Entities`.
+- **Entity**: classes mapeadas como tabelas do banco de dados (recurso de soft delete implementado para inativação lógica).
+- **Exception**: exceções customizadas tratadas pelo `GlobalExceptionHandler`, que padroniza os erros com corpos HTTP detalhados.
 
 ---
 
@@ -46,25 +48,13 @@ vet-clinic-api/
 │   └── main/
 │       ├── java/com/giullia/agenda/
 │       │   ├── AgendaApiApplication.java      # Classe principal
-│       │   ├── controller/                    # Controllers REST
-│       │   │   ├── AgendamentoController.java
-│       │   │   ├── ClienteController.java
-│       │   │   └── PetController.java
-│       │   ├── dto/                           # Objetos de entrada
-│       │   │   ├── AgendamentoRequest.java
-│       │   │   └── PetRequest.java
-│       │   ├── entity/                        # Entidades JPA
-│       │   │   ├── Agendamento.java
-│       │   │   ├── Cliente.java
-│       │   │   ├── Pet.java
-│       │   │   ├── Servico.java
-│       │   │   └── StatusAgendamento.java
-│       │   ├── exception/                     # Exceções customizadas
-│       │   │   ├── GlobalExceptionHandler.java
-│       │   │   └── HorarioIndisponivelException.java
-│       │   ├── repository/                    # Interfaces JPA
-│       │   ├── service/                       # Regras de negócio
-│       │   └── config/                        # Configurações gerais
+│       │   ├── agendamento/                   # Feature de agendamentos
+│       │   ├── auth/                          # Segurança e JWT
+│       │   ├── cliente/                       # Feature de clientes
+│       │   ├── common/exception/              # Tratamento global de erros
+│       │   ├── config/                        # Configurações gerais (Spring Security, OpenAPI)
+│       │   ├── pet/                           # Feature de pets
+│       │   └── servico/                       # Feature de serviços da clínica
 │       └── resources/
 │           └── application.properties
 └── pom.xml
@@ -83,6 +73,7 @@ Representa o tutor responsável pelo pet.
 | `nome` | String | ✅ | Nome completo do cliente |
 | `email` | String | ✅ | E-mail único do cliente |
 | `telefone` | String | ❌ | Telefone de contato |
+| `ativo` | Boolean | ✅ | Flag de inativação lógica (soft delete) |
 
 ### Pet
 Representa o animal atendido pela clínica.
@@ -95,6 +86,8 @@ Representa o animal atendido pela clínica.
 | `raca` | String | ❌ | Raça do animal |
 | `idade` | Integer | ❌ | Idade em anos |
 | `peso` | Double | ❌ | Peso em kg |
+| `cliente` | Cliente | ✅ | Tutor responsável (Lazy load) |
+| `ativo` | Boolean | ✅ | Flag de inativação lógica (soft delete) |
 
 ### Serviço
 Representa o tipo de atendimento realizado pela clínica.
@@ -106,6 +99,7 @@ Representa o tipo de atendimento realizado pela clínica.
 | `descricao` | String | ❌ | Descrição detalhada |
 | `preco` | BigDecimal | ✅ | Valor cobrado |
 | `duracaoMinutos` | Integer | ✅ | Duração estimada |
+| `ativo` | Boolean | ✅ | Flag de inativação lógica (soft delete) |
 
 ### Agendamento
 Relaciona um Pet a um Serviço em um horário específico.
@@ -115,56 +109,105 @@ Relaciona um Pet a um Serviço em um horário específico.
 | `id` | Long | — | Identificador único |
 | `pet` | Pet | ✅ | Pet a ser atendido |
 | `servico` | Servico | ✅ | Serviço agendado |
-| `dataHora` | LocalDateTime | ✅ | Data e hora do atendimento |
+| `dataHora` | LocalDateTime | ✅ | Data e hora do atendimento (deve ser no futuro) |
 | `status` | StatusAgendamento | ✅ | `AGENDADO` ou `CANCELADO` |
 
 ---
 
 ## **Endpoints da API**
+*Nota: Todos os endpoints estão protegidos por JWT e agrupados sob o path `/api/v1`.*
 
-### Pets — `/pets`
-
-| Método | Rota | Descrição |
-|---|---|---|
-| `POST` | `/pets` | Cadastrar novo pet |
-| `GET` | `/pets` | Listar todos os pets |
-| `GET` | `/pets/{id}` | Buscar pet por ID |
-| `PUT` | `/pets/{id}` | Atualizar dados do pet |
-| `DELETE` | `/pets/{id}` | Remover pet |
-
-### Clientes — `/clientes`
+### Autenticação — `/api/v1/auth`
 
 | Método | Rota | Descrição |
 |---|---|---|
-| `POST` | `/clientes` | Cadastrar novo cliente |
-| `GET` | `/clientes` | Listar todos os clientes |
-| `GET` | `/clientes/{id}` | Buscar cliente por ID |
-| `DELETE` | `/clientes/{id}` | Remover cliente |
+| `POST` | `/api/v1/auth/login` | Realizar login e obter token JWT |
 
-### Agendamentos — `/agendamentos`
+### Pets — `/api/v1/pets`
 
 | Método | Rota | Descrição |
 |---|---|---|
-| `POST` | `/agendamentos` | Criar novo agendamento |
-| `GET` | `/agendamentos` | Listar todos os agendamentos |
-| `PUT` | `/agendamentos/{id}/cancelar` | Cancelar agendamento |
+| `POST` | `/api/v1/pets` | Cadastrar novo pet |
+| `GET` | `/api/v1/pets` | Listar pets (suporta paginação) |
+| `GET` | `/api/v1/pets/{id}` | Buscar pet por ID |
+| `PUT` | `/api/v1/pets/{id}` | Atualizar dados do pet |
+| `DELETE` | `/api/v1/pets/{id}` | Remover pet (soft delete) |
+
+### Clientes — `/api/v1/clientes`
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/api/v1/clientes` | Cadastrar novo cliente |
+| `GET` | `/api/v1/clientes` | Listar clientes (suporta paginação) |
+| `GET` | `/api/v1/clientes/{id}` | Buscar cliente por ID |
+| `PUT` | `/api/v1/clientes/{id}` | Atualizar dados do cliente |
+| `DELETE` | `/api/v1/clientes/{id}` | Remover cliente (soft delete) |
+
+### Serviços — `/api/v1/servicos`
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/api/v1/servicos` | Criar novo serviço |
+| `GET` | `/api/v1/servicos` | Listar serviços (suporta paginação) |
+| `GET` | `/api/v1/servicos/{id}` | Buscar serviço por ID |
+| `PUT` | `/api/v1/servicos/{id}` | Atualizar serviço |
+| `DELETE` | `/api/v1/servicos/{id}` | Remover serviço (soft delete) |
+
+### Agendamentos — `/api/v1/agendamentos`
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/api/v1/agendamentos` | Criar novo agendamento |
+| `GET` | `/api/v1/agendamentos` | Listar agendamentos (suporta paginação) |
+| `PATCH` | `/api/v1/agendamentos/{id}/cancelar` | Cancelar agendamento (idempotente) |
 
 ---
 
 ## **Exemplos de Requisição**
 
+*Lembre-se: Todas as requisições (exceto o login) exigem o header `Authorization: Bearer <seu_token_jwt>`.*
+
+### Realizar Login
+
+```http
+POST /api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@vetclinic.com",
+  "senha": "admin"
+}
+```
+
+**Resposta:**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR...",
+  "tipo": "Bearer",
+  "usuario": {
+    "id": 1,
+    "email": "admin@vetclinic.com",
+    "roles": ["ROLE_ADMIN"]
+  }
+}
+```
+
+---
+
 ### Cadastrar um Pet
 
 ```http
-POST /pets
+POST /api/v1/pets
 Content-Type: application/json
+Authorization: Bearer <token>
 
 {
   "nome": "Rex",
   "especie": "Cão",
   "raca": "Labrador",
   "idade": 3,
-  "peso": 28.5
+  "peso": 28.5,
+  "clienteId": 1
 }
 ```
 
@@ -176,7 +219,12 @@ Content-Type: application/json
   "especie": "Cão",
   "raca": "Labrador",
   "idade": 3,
-  "peso": 28.5
+  "peso": 28.5,
+  "cliente": {
+    "id": 1,
+    "nome": "Maria Silva"
+  },
+  "ativo": true
 }
 ```
 
@@ -185,8 +233,9 @@ Content-Type: application/json
 ### Cadastrar um Cliente
 
 ```http
-POST /clientes
+POST /api/v1/clientes
 Content-Type: application/json
+Authorization: Bearer <token>
 
 {
   "nome": "Maria Silva",
@@ -201,7 +250,8 @@ Content-Type: application/json
   "id": 1,
   "nome": "Maria Silva",
   "email": "maria@email.com",
-  "telefone": "11999998888"
+  "telefone": "11999998888",
+  "ativo": true
 }
 ```
 
@@ -210,13 +260,14 @@ Content-Type: application/json
 ### Criar um Agendamento
 
 ```http
-POST /agendamentos
+POST /api/v1/agendamentos
 Content-Type: application/json
+Authorization: Bearer <token>
 
 {
   "petId": 1,
   "servicoId": 2,
-  "dataHora": "2025-04-10T14:00:00"
+  "dataHora": "2026-04-10T14:00:00"
 }
 ```
 
@@ -226,7 +277,7 @@ Content-Type: application/json
   "id": 1,
   "pet": { "id": 1, "nome": "Rex" },
   "servico": { "id": 2, "nome": "Consulta" },
-  "dataHora": "2025-04-10T14:00:00",
+  "dataHora": "2026-04-10T14:00:00",
   "status": "AGENDADO"
 }
 ```
@@ -236,7 +287,8 @@ Content-Type: application/json
 ### Cancelar um Agendamento
 
 ```http
-PUT /agendamentos/1/cancelar
+PATCH /api/v1/agendamentos/1/cancelar
+Authorization: Bearer <token>
 ```
 
 **Resposta:** `200 OK` (sem corpo)
@@ -293,15 +345,16 @@ A documentação permite visualizar todos os endpoints, modelos de dados e reali
 
 ## **Roadmap**
 
-| # | Melhoria | Descrição |
+| # | Melhoria | Status |
 |---|---|---|
-| 1 | Autenticação com Spring Security | Proteção dos endpoints com autenticação de usuário |
-| 2 | JWT para autenticação stateless | Tokens de acesso sem estado para escalabilidade |
-| 3 | Endpoints administrativos | Rotas protegidas com controle de perfil de acesso |
-| 4 | DTOs para saída de dados | Uso de DTOs de resposta para desacoplar entidades da API |
-| 5 | Tratamento global de exceções | Respostas de erro padronizadas e mensagens amigáveis |
-| 6 | Paginação de resultados | Suporte a `page`, `size` e `sort` nas listagens |
-| 7 | Integração com frontend web responsivo | Interface web para consumo da API |
+| 1 | Autenticação com Spring Security | 🟢 Concluído |
+| 2 | JWT para autenticação stateless | 🟢 Concluído |
+| 3 | Controle de perfil de acesso (Roles) | 🟢 Concluído |
+| 4 | DTOs para entrada e saída de dados | 🟢 Concluído |
+| 5 | Tratamento global de exceções | 🟢 Concluído |
+| 6 | Paginação de resultados | 🟢 Concluído |
+| 7 | Integração com frontend web responsivo | 🟡 Pendente |
+| 8 | Testes Unitários e de Integração | 🟡 Pendente |
 
 ---
 
